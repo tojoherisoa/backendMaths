@@ -8,6 +8,11 @@ interface PredictionResult {
     monteCarlo?: string;
     peakAnalysis?: { probability: number, text: string };
     recommendation?: { action: 'GO' | 'STOP', confidence: number, reason: string };
+    calmAnalysis?: {
+        turn1: { isCalm: boolean, probability: number };
+        turn2: { isCalm: boolean, probability: number };
+        globalProbability: number;
+    };
 }
 
 export class SequenceAnalyzer {
@@ -106,7 +111,57 @@ export class SequenceAnalyzer {
         // Ajout de la recommandation GO/STOP (>= 3.0 dans les 2 prochains tours)
         robustStats.recommendation = this.generateRecommendation(history);
 
+        // Ajout de l'analyse de Zone Calme (2 tours)
+        robustStats.calmAnalysis = this.analyzeCalmZone(history);
+
         return robustStats;
+    }
+
+    /**
+     * Analyse la probabilité de "Zone Calme" (< 3.0) pour les 2 prochains tours
+     */
+    public analyzeCalmZone(history: number[]): {
+        turn1: { isCalm: boolean, probability: number };
+        turn2: { isCalm: boolean, probability: number };
+        globalProbability: number;
+    } {
+        const threshold = 3.0; // Seuil de calme
+        const simulations = 5000;
+        const pool = history.slice(-50);
+
+        if (pool.length === 0) {
+            return {
+                turn1: { isCalm: false, probability: 0 },
+                turn2: { isCalm: false, probability: 0 },
+                globalProbability: 0
+            };
+        }
+
+        let t1CalmCount = 0;
+        let t2CalmCount = 0;
+        let bothCalmCount = 0;
+
+        for (let i = 0; i < simulations; i++) {
+            const val1 = pool[Math.floor(Math.random() * pool.length)];
+            const val2 = pool[Math.floor(Math.random() * pool.length)];
+
+            const t1Calm = val1 < threshold;
+            const t2Calm = val2 < threshold;
+
+            if (t1Calm) t1CalmCount++;
+            if (t2Calm) t2CalmCount++;
+            if (t1Calm && t2Calm) bothCalmCount++;
+        }
+
+        const p1 = (t1CalmCount / simulations) * 100;
+        const p2 = (t2CalmCount / simulations) * 100;
+        const pGlobal = (bothCalmCount / simulations) * 100;
+
+        return {
+            turn1: { isCalm: p1 > 60, probability: parseFloat(p1.toFixed(1)) },
+            turn2: { isCalm: p2 > 60, probability: parseFloat(p2.toFixed(1)) },
+            globalProbability: parseFloat(pGlobal.toFixed(1))
+        };
     }
 
     /**

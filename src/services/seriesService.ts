@@ -73,21 +73,65 @@ export class SeriesService {
 
     /**
      * Get all numbers from all series in chronological order
+     * Get all numbers from all series in chronological order, with smart deduplication
+     * Handles cases where user re-pastes full history with new items
      */
     async getAllSessionNumbers(sessionId: string): Promise<number[]> {
+        // 1. Get all series ordered by creation date (newest first)
         const series = await prisma.numberSeries.findMany({
             where: { sessionId },
-            orderBy: { createdAt: 'asc' },
+            orderBy: { createdAt: 'desc' },
         });
 
-        const allNumbers: number[] = [];
+        const keptSeries: number[][] = [];
 
+        // 2. Filter out subsets
         for (const s of series) {
-            const numbers = JSON.parse(s.numbers) as number[];
-            allNumbers.push(...numbers);
+            const currentNumbers = JSON.parse(s.numbers) as number[];
+
+            // Check if this series is already contained in a series we decided to keep
+            // (We check against keptSeries which are newer or larger)
+            let isSubset = false;
+            for (const kept of keptSeries) {
+                if (this.isSubsequence(currentNumbers, kept)) {
+                    isSubset = true;
+                    break;
+                }
+            }
+
+            if (!isSubset) {
+                keptSeries.push(currentNumbers);
+            }
+        }
+
+        // 3. Assemble in chronological order (since we processed DESC, we reverse to get ASC)
+        // But wait, if we have distinct chunks [4,5,6] (new) and [1,2,3] (old), 
+        // keptSeries has [[4,5,6], [1,2,3]].
+        // We want [1,2,3, 4,5,6].
+        // So we reverse keptSeries.
+        keptSeries.reverse();
+
+        const allNumbers: number[] = [];
+        for (const nums of keptSeries) {
+            allNumbers.push(...nums);
         }
 
         return allNumbers;
+    }
+
+    /**
+     * Helper to check if array A is a subsequence of array B
+     * (Simple implementation: checks if A is a contiguous subarray of B)
+     */
+    private isSubsequence(subset: number[], superset: number[]): boolean {
+        if (subset.length > superset.length) return false;
+
+        // Convert to string for easy substring check (hacky but effective for exact sequence match)
+        // Using a separator to avoid partial number matches (e.g. "1" in "12")
+        const subStr = subset.join('|');
+        const superStr = superset.join('|');
+
+        return superStr.includes(subStr);
     }
 
     /**
